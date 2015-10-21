@@ -1,0 +1,199 @@
+database/sql and friends
+
+Patrick Edgett
+Software Engineer, FireEye
+
+* database/sql
+
+	Package sql provides a generic interface around SQL (or SQL-like) databases.
+
+	The sql package must be used in conjunction with a database driver. See
+	https://golang.org/s/sqldrivers for a list of drivers.
+
+	For more usage examples, see the wiki page at https://golang.org/s/sqlwiki.
+
+In addition to godoc, "Go database/sql tutorial" is excellent
+
+.link http://go-database-sql.org
+
+* Connecting a Driver
+
+A driver implements the `database/sql/driver` interfaces.  Importing them should automatically register them for use.
+
+.code examples/driver.go /^import/,/^}/
+
+- `sql.Open` returns a `*sql.DB` which is NOT a connection to the database.
+- Use `db.SetMaxIdleConns` and `db.SetMaxOpenConns` to manage pooled connections
+
+* Doing stuff
+
+- `Exec()` - execute a statement without fetching any data
+- `Query()` - execute a statement, iterate over the response rows
+- `QueryRow()` - like `Query()` but without the iteration boilerplate
+
+These can be executed from:
+
+- The `*sql.DB` handle from the call to `sql.Open`
+- A prepared statement, `*sql.Stmt` by via `db.Prepare` or `tx.Prepare`
+- A transaction object, `*sql.Tx` obtained with `db.Begin`
+
+* Exec()uting Statements
+
+.code examples/sql_queries.go /START EXEC/,/END EXEC/
+
+* Query()ing for Rows
+
+.code examples/sql_queries.go /START QUERY/,/END QUERY/
+
+* rows.Scan()
+
+Scan supports strings, ints, floats, []byte, bool.  Additional types can implement the `sql.Scanner` interface or be provided by your driver (eg `time.Time`).
+
+.code examples/sql_queries.go /type Foo struct/,/\}/
+
+.code examples/sql_queries.go /START SCAN/,/END SCAN/
+
+If all else fails and you don't know how to scan something, scan it into a `sql.RawBytes` variable.  It's a byte slice that's only valid until the row object is advanced.
+
+
+* Grabbing a single row - QueryRow()
+
+	func (db *DB) QueryRow(query string, args ...interface{}) *Row
+
+`QueryRow` eliminates the boilerplate of iterating the `*sql.Rows` object returned by `Query`.  You can `Scan()` away.
+
+.code examples/sql_queries.go /START QUERYROW/,/END QUERYROW/
+
+Note: `row.Scan` will return the error `sql.ErrNoRows` if no row comes back.
+
+
+* Quality of life improvements?
+
+ORM-ish things
+
+- beego's orm has support for relations, query building syntax similar to other orms where you chain filters as well as a Querybuilder interface.
+- gorm: has support for relations, query syntax kinda knex-like (`.Where("id = ?", 42)`)
+- gorp: focuses on mapping tables to structs, shorthand for common queries (get struct by ID) and generating ddl
+
+If you're looking for rails activerecord, django.db, sqlalchemy, you're gonna have a bad time
+
+.link http://beego.me/docs/mvc/model/overview.md
+.link https://github.com/jinzhu/gorm
+.link https://github.com/go-gorp/gorp
+
+* sqlx!
+
+	general purpose extensions to golang's database/sql
+
+- All sqlx types embed their associated types from the `sql` package
+- Adds additional scanning capabilities like scanning directly to a struct or to a map by lining up the columns in the response row with struct fields or map keys.
+- Provides a `Select` which hides all the query() boilerplate, supports scanning to slices of structs.
+- Query rebinding.  Hate query building with `$n` placeholders?  No more!
+- Supports executing named statements which are populated from maps/structs
+
+	INSERT INTO foo (value) VALUES (:value)
+
+.link https://github.com/jmoiron/sqlx
+
+* sqlx struct scanning
+
+.code examples/sqlx_queries.go /START SELECT/,/END SELECT/
+
+sqlx's `Queryx` and `QueryRowx` include the normal `Scan` method but also `StructScan`, `MapScan` and `SliceScan`.
+
+A convenience method round struct-scanning a single row is provided as `Get`.
+
+* Modeling Data
+
+For dynamic queries or the lazy, use something similar to sqlx's MapScan.  The `*sql.Rows` object provides an array of columns with `Columns()`.
+
+For staticly typed goodness, we need data mapped into something for us to work with.
+
+Using proper database representations in your struct might not produce the most idiomatic code.
+
+* Nulls
+
+`database/sql` provides some null types for bools, float64, int64 and strings
+
+	type NullString struct {
+		String string
+		Valid  bool // Valid is true if String is not NULL
+	}
+
+- These don't implement json.Marshaler/Unmarshaler so might produce unexpected json
+	
+	{"Valid": false, "String": ""}
+
+It can be useful to just rely on go's default empty values to indicate "null"
+
+* Intermediate objects
+
+Utilize anonymous structs when performing queries and convert/copy the data from them into the final type.
+
+.code examples/null_string.go /START QUERYROW/,/END QUERYROW/
+
+* JSON
+
+Postgres is webscale and provides JSON columns.  `sqlx/types` provides a JsonText type that's scannable and valuable.
+
+	type Event struct {
+		ID string
+		Type string
+		Data types.JsonText
+		CommonField1 string
+	}
+	func (e *Event) GetData() (interface{}, error) { ... }
+	func (e *Event) SetData(interface{}) error { ... }
+
+versus just working with an `Event` struct everywhere with a nice Data that's an `interface{}` with idiomatic type switching
+
+* Making all of this reusable and testable
+
+- Create and use a queryer interface that's implemented by both `*sql.DB` and `*sql.Tx`.  Same code can be used in or outside a transaction, and tests can defer `tx.Rollback()`.
+
+	type Sequeler interface {
+		Exec(query string, args ...interface{}) (sql.Result, error)
+		Query(query string, args ...interface{}) (*sql.Rows, error)
+		QueryRow(query string, args ...interface{}) *sql.Row
+	}
+
+	func querySingleFoo(db Sequeler, id int) (Foo, error) { .. }
+
+- Use interfaces collections of operations on the data so they can be mocked out.
+
+	type FooStore interface {
+		Get(id int) (Foo, error)
+		List(FooListOptions) ([]Foo, error)
+	}
+
+
+* When all else fails...
+
+	func TestFoo(t *testing.T) {
+		defer db.MustExec("TRUNCATE foo")
+	}
+
+* Rest APIs
+
+	type FooListOptions struct {
+		IDs []int `schema:"id"`
+		Value string
+	}
+
+	func (o FooListOptions) Wheres(wheres []string, params []interface{}) ([]string, []interface{}) { ... }
+
+	type FooStore interface {
+		List(FooListOptions) ([]Foo, error)
+	}
+
+	func fooListEndpoint(w http.ResponseWriter, r *http.Request, store *FooStore) {
+		opts := FooListOptions{}
+		if err := schema.NewDecoder().Decode(&opts, r.URL.Query()); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		foos, err := store.List(opts)
+		...
+	}
+
+.link http://www.gorillatoolkit.org/pkg/schema
