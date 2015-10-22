@@ -72,7 +72,7 @@ Note: `row.Scan` will return the error `sql.ErrNoRows` if no row comes back.
 ORM-ish things
 
 - beego's orm has support for relations, query building syntax similar to other orms where you chain filters as well as a Querybuilder interface.
-- gorm: has support for relations, query syntax kinda knex-like (`.Where("id = ?", 42)`)
+- gorm: has support for relations, query building syntax .Where("id = ?", 42)
 - gorp: focuses on mapping tables to structs, shorthand for common queries (get struct by ID) and generating ddl
 
 If you're looking for rails activerecord, django.db, sqlalchemy, you're gonna have a bad time
@@ -101,7 +101,7 @@ If you're looking for rails activerecord, django.db, sqlalchemy, you're gonna ha
 
 sqlx's `Queryx` and `QueryRowx` include the normal `Scan` method but also `StructScan`, `MapScan` and `SliceScan`.
 
-A convenience method round struct-scanning a single row is provided as `Get`.
+A convenience method for struct-scanning a single row is provided as `Get`.
 
 * Modeling Data
 
@@ -121,7 +121,7 @@ Using proper database representations in your struct might not produce the most 
 	}
 
 - These don't implement json.Marshaler/Unmarshaler so might produce unexpected json
-	
+
 	{"Valid": false, "String": ""}
 
 It can be useful to just rely on go's default empty values to indicate "null"
@@ -166,12 +166,10 @@ versus just working with an `Event` struct everywhere with a nice Data that's an
 		List(FooListOptions) ([]Foo, error)
 	}
 
+* Things I'm missing
 
-* When all else fails...
-
-	func TestFoo(t *testing.T) {
-		defer db.MustExec("TRUNCATE foo")
-	}
+- factoryboy/factorygirl style db-struct-mapped data generators
+- go generate rest crud
 
 * Rest APIs
 
